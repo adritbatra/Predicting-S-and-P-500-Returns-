@@ -1,0 +1,791 @@
+---
+title: "Final Project v14"
+output: html_document
+date: "2024-12-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidymodels)
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(dplyr)
+library(ggrepel)
+library(ggplot2)
+```
+
+```{r}
+CPI <- read.csv("/Users/adritbatra/Desktop/Final Project/CPI.csv")
+head(CPI)
+Unemployment_Rate <- read.csv("/Users/adritbatra/Desktop/Final Project/Unemployment_Rate.csv")
+head(Unemployment_Rate)
+M2SL <- read.csv("/Users/adritbatra/Desktop/Final Project/M2SL.csv")
+head(M2SL)
+Recession <- read.csv("/Users/adritbatra/Desktop/Final Project/Recession.csv")
+head(Recession)
+Housing_Starts <- read.csv("/Users/adritbatra/Desktop/Final Project/Housing_Starts.csv")
+head(Housing_Starts)
+R_star <- read_excel("/Users/adritbatra/Desktop/Final Project/Neutral_Rate.xlsx", sheet = 'data')
+Fed_funds <- read.csv("/Users/adritbatra/Desktop/Final Project/Fed Funds.csv")
+head(Fed_funds)
+`1_Year_inflation_expectations` <- read.csv("/Users/adritbatra/Desktop/Final Project/1_Year_Inflation_Expectations.csv")
+head(`1_Year_inflation_expectations`)
+SPX <- read.csv("/Users/adritbatra/Desktop/Final Project/SPX.csv")
+head(SPX)
+```
+
+## Introduction 
+
+The aim of this project is to explore the relationships between macroeconomic indicators, monetary policy, and stock market performance, focusing on the S&P 500 index's year-over-year percentage change (SPX YoY%) as the target variable. Using a combination of economic, financial, and policy-related features, this study attempts to understand the factors that drive fluctuations in SPX YoY% and provide insights into how macroeconomic conditions influence market behavior.
+
+The dataset used in this analysis was sourced from the Federal Reserve Economic Data (FRED) database, a comprehensive resource maintained by the Federal Reserve Bank of St. Louis. FRED provides access to a wide array of economic time-series data, enabling robust analyses of economic trends and their implications.
+
+## Goals of the Research
+
+The research is designed with the following objectives:
+
+Understanding Market Drivers: Examine how key macroeconomic indicators, such as CPI changes, unemployment rates, and monetary stance, contribute to the variation in SPX YoY%. By identifying significant predictors, the study aims to highlight the most influential factors affecting stock market returns.
+
+Analyzing Economic Cycles: Investigate the relationship between periods of economic recession and expansion and their impact on the S&P 500's performance. This involves exploring whether recessions and other macroeconomic shifts lead to predictable changes in the stock market.
+
+Evaluating Monetary Policy Impacts: Assess the role of monetary stance (e.g., restrictive or expansionary policies) in shaping stock market behavior, providing insights into how policy decisions influence financial markets.
+
+Developing Predictive Insights: The study will employ linear regression and random forest models to predict SPX YoY% based on the provided features. These models are chosen to combine the simplicity and interpretability of linear regression with the flexibility and non-linear pattern recognition capabilities of random forests. The goal is to determine the extent to which macroeconomic and financial data can forecast market performance, potentially aiding investors and policymakers in decision-making.
+
+By addressing these goals, the research contributes to a deeper understanding of the interplay between economic fundamentals and financial market dynamics, offering valuable insights for both academic and practical applications.
+
+Basic Data Cleaning:
+
+-   **Set Column Names**: Used the 5th row as the new column headers bc the 1st 4 weren't applicable
+
+-   **Remove Extra Rows**: Deleted the first 5 rows, which were unnecessary.
+
+-   **Fix Row Numbers**: Reset row numbering to make it tidy.
+
+-   **Convert Dates**: Changed date format from Excel-style to a readable calendar date.
+
+-   **Keep Key Data**: Kept only the first and third columns for focus.
+
+-   **Rename and Format**: Renamed `rstar` to `R_star(%)`, converted to numbers, and rounded to two decimals.
+
+```{r}
+names(R_star) <- R_star[5, ]
+
+R_star <- R_star[-(1:5), ]
+
+rownames(R_star) <- NULL
+
+
+R_star$Date <- as.Date(as.numeric(R_star$Date), origin = "1899-12-30")
+
+
+R_star <- R_star[, c(1, 3)]
+
+R_star <- R_star |>
+  mutate(`R_star(%)` = as.numeric(rstar) |> round(2)) |>
+  select(-rstar)
+
+head(R_star)
+
+```
+
+-   **`CPI_clean`**:
+
+    -   Converted `DATE` to a proper date format (`YYYY-MM-DD`).
+
+    -   Converted `CPALTT01USM657N` to numeric, rounded to two decimal places, and renamed it to `CPI MoM(%)`.
+
+    -   Removed unnecessary columns (`CPALTT01USM657N`, `DATE`).
+
+-   **`Unemployment_rate_clean`**:
+
+    -   Converted `DATE` to a proper date format.
+
+    -   Renamed `UNRATE` to `Unemployment_rate`.
+
+    -   Dropped redundant columns (`UNRATE`, `DATE`).
+
+-   **`M2SL_clean`**:
+
+    -   Converted `DATE` to a proper date format.
+
+    -   Renamed `M2SL` to `M2 (Billions $)`.
+
+    -   Removed unused columns (`DATE`, `M2SL`).
+
+-   **`Recession_clean`**:
+
+    -   Converted `DATE` to a proper date format.
+
+    -   Transformed `USREC` into a factor: `1` becomes "YES", `0` becomes "NO".
+
+    -   Removed unused columns (`DATE`, `USREC`).
+
+-   **`Housing_starts_clean`**:
+
+    -   Converted `DATE` to a proper date format.
+
+    -   Renamed `HOUST` to `Starts (Thousands)`.
+
+    -   Selected only `Date` and `Starts (Thousands)` columns.
+
+-   **`Fed_funds_clean`**:
+
+    -   Converted `DATE` to a proper date format.
+
+    -   Renamed `DFF` to `Fed_funds_rate (%)`.
+
+    -   Selected only `Date` and `Fed_funds_rate (%)` columns.
+
+-   **`One_Year_inflation_expectations_clean`**:
+
+    -   Converted `DATE` to a proper date format.
+
+    -   Renamed `EXPINF1YR` to `One_year_inflation (%)`, rounded to two decimals.
+
+    -   Removed unused columns (`EXPINF1YR`, `DATE`).
+
+-   **`SPX_clean`**:
+
+    -   Verified that `Date` was already in a valid date format.
+
+    -   Renamed `SP500` to `SPX (USD)` and rounded values to two decimals.
+
+    -   Retained only `Date` and `SPX (USD)` columns.
+
+```{r}
+CPI_clean <- CPI |>
+  mutate(
+    Date = as.Date(DATE, format = "%Y-%m-%d"),  
+    `CPI MoM(%)` = as.numeric(CPALTT01USM657N) |> round(2)
+  ) |>
+  select(-CPALTT01USM657N, -DATE)
+head(CPI_clean)
+
+
+Unemployment_rate_clean <- Unemployment_Rate |>
+  mutate(
+    Date = as.Date(DATE, format = "%Y-%m-%d"), 
+    Unemployment_rate = UNRATE 
+  ) |>
+  select(-UNRATE, -DATE)
+head(Unemployment_rate_clean)
+
+M2SL_clean <- M2SL |>
+  mutate(
+    Date = as.Date(DATE, format = "%Y-%m-%d"), `M2 (Billions $)` = M2SL
+  )|>
+  select(-DATE, -M2SL)
+head(M2SL_clean)
+
+
+Recession_clean <- Recession |>
+  mutate(
+    Date = as.Date(DATE, format = "%Y-%m-%d"),  
+    Recession = as.factor(ifelse(USREC == 1, "YES", "NO"))  
+  ) |>
+  select(-DATE, -USREC)
+head(Recession_clean)
+
+Housing_starts_clean <- Housing_Starts |>
+  mutate(
+    Date = as.Date(DATE, format = "%Y-%m-%d"),
+    `Starts (Thousands)` = HOUST) |>
+  select(Date, `Starts (Thousands)`)
+head(Housing_starts_clean)
+
+Fed_funds_clean <- Fed_funds |>
+  mutate(
+    Date = as.Date(DATE, format = "%Y-%m-%d"),
+    `Fed_funds_rate (%)` = DFF) |>
+  select(Date, `Fed_funds_rate (%)`)
+head(Fed_funds_clean)
+    
+
+One_Year_inflation_expectations_clean <- `1_Year_inflation_expectations` |>
+  mutate(
+    Date = as.Date(DATE, format = "%Y-%m-%d"),  
+    `One_year_inflation (%)` = EXPINF1YR |> round(2)
+  ) |>
+  select(-EXPINF1YR, -DATE)
+head(One_Year_inflation_expectations_clean) 
+
+SPX_clean <- SPX |>
+  mutate(
+    Date = as.Date(Date, format = "%Y-%m-%d"),
+    `SPX (USD)` = SP500 |> round(2)
+  )|>
+  select(Date, `SPX (USD)`)
+head(SPX_clean)
+```
+
+-   **Removing Duplicates**:
+
+    -   Ensured no duplicate rows in `R_star`, `Fed_funds_clean`, and `One_Year_inflation_expectations_clean` by keeping only unique `Date` entries.
+
+-   **Merging Datasets**:
+
+    -   Merged `R_star`, `Fed_funds_clean`, and `One_Year_inflation_expectations_clean` using `Date` as the key.
+
+    -   Removed rows with missing values (`NA`) after merging to ensure a clean dataset.
+
+-   **Creating `Monetary_tightness`**:
+
+    -   **Neutral Rate**: Calculated as the sum of `R_star(%)` (natural interest rate) and `One_year_inflation (%)` (inflation expectations).
+
+    -   **Monetary Stance**:
+
+        -   Classified the Federal Reserve’s stance as:
+
+            -   **Restrictive**: When the Fed Funds Rate is more than 0.5% above the Neutral Rate.
+
+            -   **Accommodative**: When the Fed Funds Rate is more than 0.5% below the Neutral Rate.
+
+            -   **Neutral**: When the Fed Funds Rate is within ±0.5% of the Neutral Rate.
+
+        -   The ±0.5% range accounts for minor adjustments and ensures clear classification of significant policy shifts.
+
+-   **Selecting Final Columns**:
+
+    -   Kept only `Date` and `Monetary_stance` columns for the final output (`Monetary_tightness_clean`).
+
+```{r}
+R_star <- R_star |> distinct(Date, .keep_all = TRUE)
+Fed_funds_clean <- Fed_funds_clean |> distinct(Date, .keep_all = TRUE)
+One_Year_inflation_expectations_clean <- One_Year_inflation_expectations_clean |> distinct(Date, .keep_all = TRUE)
+
+
+Real_fed_funds_and_r_star <- R_star |>
+  left_join(Fed_funds_clean, by = "Date") |>
+  left_join(One_Year_inflation_expectations_clean, by = "Date") |>
+  na.omit()
+
+band_width <- 0.5  
+
+Monetary_tightness <- Real_fed_funds_and_r_star |>
+  mutate(
+    Neutral_rate = `R_star(%)` + `One_year_inflation (%)`,
+    Monetary_stance = case_when(
+      `Fed_funds_rate (%)` > (Neutral_rate + band_width) ~ "Restrictive",
+      `Fed_funds_rate (%)` < (Neutral_rate - band_width) ~ "Accommodative",
+      TRUE ~ "Neutral"
+    )
+  )
+head(Monetary_tightness)
+
+Monetary_tightness_clean <- Monetary_tightness |>
+  select(Date, Monetary_stance)
+head(Monetary_tightness_clean)
+
+```
+
+-   **Combining Data**:
+
+    -   Merged all cleaned datasets (`Housing_starts_clean`, `CPI_clean`, `Unemployment_rate_clean`, `Recession_clean`, `Monetary_tightness_clean`, and `SPX_clean`) using `Date` as the key.
+
+    -   Filled missing `Monetary_stance` values by carrying forward the last observed value.
+
+-   **Handling Missing Values**:
+
+    -   Removed rows with any remaining `NA` values to ensure completeness.
+
+-   **Data Formatting**:
+
+    -   Converted `Recession` and `Monetary_stance` into categorical variables for analysis.
+
+-   **Creating New Variables**:
+
+    -   **CPI Index**:
+
+        -   Reconstructed using cumulative monthly percentage changes (`CPI MoM(%)`) starting from a base of 100.
+
+    -   **CPI YoY**:
+
+        -   Calculated the year-over-year percentage change in the CPI Index.
+
+    -   **SPX YoY(%)**:
+
+        -   Calculated the year-over-year percentage change in the S&P 500 index (`SPX (USD)`).
+
+    -   **Unemployment YoY**:
+
+        -   Calculated the year-over-year percentage change in the unemployment rate.
+
+    -   **Using a Lag of 11**:
+
+        -   For YoY calculations, a lag of 11 months was used instead of 12 because all October 1st data was removed for simplicity. This ensures accurate comparisons with the adjusted dataset.
+
+-   **Filtering Data**:
+
+    -   Removed rows with `NA` values in newly created variables (`CPI_YoY`, `SPX YoY(%)`, `Unemployment_YoY`).
+
+-   **Final Output**:
+
+    -   Sorted the dataset by `Date` and verified all transformations.
+
+```{r}
+combined_data <- Housing_starts_clean |>
+  left_join(CPI_clean, by = "Date") |>
+  left_join(Unemployment_rate_clean, by = "Date") |>
+  left_join(Recession_clean, by = "Date") |>
+  left_join(Monetary_tightness_clean, by = "Date") |>
+  left_join(SPX_clean, by = "Date")
+
+combined_data2 <- combined_data |>
+  fill(Monetary_stance, .direction = "down") |>
+  na.omit()
+
+combined_data3 <- combined_data2 |>
+  mutate(
+    Recession = as.factor(Recession),
+    Monetary_stance = as.factor(Monetary_stance)
+  )
+
+combined_data4 <- combined_data3 |>
+  arrange(Date) |>
+  mutate(
+    CPI_Index = 100 * cumprod(1 + `CPI MoM(%)` / 100),
+    CPI_YoY = round((CPI_Index / lag(CPI_Index, 11) - 1) * 100, 2),
+    
+    `SPX YoY(%)` = round((`SPX (USD)` / lag(`SPX (USD)`, 11) - 1) * 100, 2),
+    Unemployment_YoY = round((Unemployment_rate / lag(Unemployment_rate, 12) - 1) * 100, 2)
+  ) |>
+  filter(!is.na(CPI_YoY), !is.na(`SPX YoY(%)`), !is.na(Unemployment_YoY))
+
+view(combined_data4)
+
+```
+
+## Exploratory Plot 1
+
+```{r}
+# Create the histogram with facets for Recession
+ggplot(combined_data, aes(x = `Starts (Thousands)`, fill = Monetary_stance)) +
+  geom_histogram(position = "stack", bins = 30, color = "black") +
+  facet_wrap(~ Recession) +
+  labs(
+    title = "Histogram of Housing Starts by Monetary Stance and Recession",
+    x = "Housing Starts (Thousands)",
+    y = "Frequency",
+    fill = "Monetary Stance"
+  ) +
+  theme_minimal() 
+```
+
+## Exploratory Plot 2
+
+For the second exploratory plot we wanted to investigate the relationship between the percentage change of unemployment year over year with the percentage change in the rate of the CPI Inflation. Our rationale behind creating this plot was to visualize the Phillips Curve, a concept which states that the relationship between unemployment and inflation is inverse and has a "curved" relationship.
+
+If the data did in fact show this inverse "curved" relationship, we anticipated that during periods of low inflation (recessions) we would see data points shift downward, and the curve that passed through these points to shift downward as well. We were quite interested to see if the macro-economy of the last 60 years reflected this theory.
+
+A jitter plot was used instead of a simple scatter-plot to better visualize clusters and overlapping points within the data. The plots showed that periods of non-recession characterized with higher inflation rates than during periods of recession, saw higher unemployment, as explained by the theory of the Phillips curve. The data, also exhibited the "curve" like shift (although, the data is not perfectly curved) from falling inflation during periods of recession.
+
+```{r}
+ggplot(combined_data4, aes(x = Unemployment_YoY, y = CPI_YoY, color = Recession)) +
+  geom_jitter(size = 3, alpha = 0.7, width = 0.2, height = 0.2) +
+  labs(
+    title = "Scatter Plot of CPI YoY vs. Unemployment YoY by Recession (Jittered)",
+    x = "Unemployment YoY (%)",
+    y = "CPI YoY (%)",
+    color = "Recession"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    legend.position = "top"
+  ) +
+  xlim(-50, 200) +
+  ylim(-5, 10)+
+  geom_smooth(data = combined_data4, method = 'loess', se = FALSE)
+
+```
+
+## Model Plot 1
+
+For the first model plot, we wanted to analyze the effect on monetary stance and recessions on the returns of the S&P 500. The S&P 500 being an index of the 500 fastest growing companies in the United States, is a great indicator of the US stock market at large. Therefore by looking at the effects on this index, we were essentially looking at the effects of monetary stance and recessions on the US stock market.
+
+Theory would suggest that
+
+1.  An accomodative monetary stance, seeks to grow the economy through cuts to interest rates, increasing the money supply and encouraging businesses to invest and consumers to spend. This measure is usually taken up by the US Federal Reserve during periods of recession as it helps to slow down or reverse economic downturn. Should the Federal Reserve choose to stimulate the economy with an accomodative monetary policy during times of economic growth, they risk overstimulating the economy and pushing into a period of inflation or hyperinflation. As such, the hypothesis made was that
+    1.  During periods of non-recession or recession, a accomodative monetary stance should result in higher S&P returns, but a very large variation in returns as a result of varying degrees of restrictive stances taken up by the US Federal Reserve across the different economic conditions across time depending on how high or low the inflation level was at the time. These lower and high variance of values should be reflected in the boxplot.
+2.  A neutral monetary stance seeks to keep the economy at the same rate and make no changes to the interest rates or the money supply. As such the hypothesis made with respect to a neutral stance is that
+    1.  During periods of recession and non-recession a neutral monetary stance would cause little to no change in the S&P as no stimulation or restriction is applied on the economy, and the plot will reflect this with a box-plot with minimal variance on the y axis
+3.  A restrictive monetary stance seeks to slow down the economy by increasing interest rates and decreasing the money supply. This measure is usually taken up by the US Federal Reserve during periods of economic growth to discourage businesses from investing and consumers from spending and slow the economy down as a result. The federal reserve would be unlikely to use such a tactic during periods of economic downturn as it would reduce investing and spending further and hurt the economy. As such the hypothesis made was that:
+    1.  During periods of non-recession, a restrictive monetary policy should result in lower S&P returns but a very large variation in returns as a result of varying degrees of restrictive stances taken up by the US Federal Reserve across the different economic conditions across time depending on how high the inflation level was at the time. These lower and high variance of values should be reflected in the boxplot.
+    2.  During periods of recession, a restrictive monetary policy should hurt the economy and push S&P returns lower however it's difficult to speculate what the variance in S&P returns would be
+
+The data reflects the accomodative hypothesis of
+
+1.  An accomodative monetary stance resulting in a high variability in S&P returns during periods of recession and non-recession
+
+In the case of a neutral stance,
+
+1.  a neutral monetary stance results in a low variability in S&P returns during periods of recession, but...
+2.  a high variability in S&P returns during periods or non-recession
+
+In the case of a restrictive stance
+
+1.  a restrictive monetary stance results in a low variability in S&P returns during periods of recession
+2.  a high variability in S&P returns during periods or non-recession
+
+The high variability in S&P returns in the case of a neutral monetary stance during periods of non-recession could be a result of other economic factors such as GDP growth, market speculation, geopolitical risks etc. that would result in varying levels of percentage changes in the S&P depending on their strength or severity.
+
+```{r}
+ggplot(combined_data4, aes(x = Monetary_stance, y = `SPX YoY(%)`, fill = Recession)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 16, position = position_dodge(0.8)) +
+  labs(
+    title = "Boxplot of SPX YoY (%) by Monetary Stance and Recession",
+    x = "Monetary Stance",
+    y = "SPX YoY (%)",
+    fill = "Recession"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    legend.position = "top"
+  )
+
+
+```
+
+## Model Plot 2
+
+For the second model plot, we thought it might be interesting to look into the average S&P 500 returns by monetary stance during periods of recession and non-recession. We hoped that this would provide some insight into the economic conditions under which the US Federal Reserve would take on certain monetary stances since the S&P is a good aggregate of the US stock market at large.
+
+The plot below shows that
+
+1.  The Federal Reserve is more likely to take on an accomodative monetary stance when they see the S&P annual returns, and the US stock market at large growing at a rate of between -16% and 9%
+    1.  This makes sense considering that the S&P has seen an average return of about 10.3% since 1957, and growth under 10.3% could be a sign that the economy requires to be stimulated with an accomodative monetary stance
+2.  The Federal Reserve is more likely to take on a neutral monetary stance when the see S&P annual returns, and the US stock market growing at a rate of between -6% and 12%
+3.  The Federal Reserve is more likely to take on a restrictive monetary stance when the see S&P annual returns, and the US stock market growing at a rate of between 0 and -6% or exceeding 12%
+
+It is important that the US Federal Reserve (Fed) may take on a neutral or restrictive monetary stance in a recessionary period despite what we would expect to combat certain economic scenarios such as during periods of stagflation (a scenario in which high inflation co-exists alongside economic downturn characterized by a recession). An example of this is during as the oil shocks and stagflation of the 1970s, when the Fed took a restrictive monetary stance, making cuts to interest rates to combat the record high inflation at the time.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Summarize data to calculate average SPX YoY (%) for each Monetary Stance and Recession state
+summary_data <- combined_data4 |>
+  group_by(Monetary_stance, Recession) |>
+  summarise(Average_SPX_YoY = mean(`SPX YoY(%)`, na.rm = TRUE)) |>
+  ungroup()
+
+# Create the bar graph
+ggplot(summary_data, aes(x = Monetary_stance, y = Average_SPX_YoY, fill = Recession)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  labs(
+    title = "Average SPX YoY (%) by Monetary Stance and Recession",
+    x = "Monetary Stance",
+    y = "Average SPX YoY (%)",
+    fill = "Recession"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10),
+    legend.position = "top"
+  )
+
+```
+
+## Exploratory Linear Model 1
+
+From the exploratory and model plots, we figured out that there was a relationship between CPI Inflation and unemployment as well as the S&P 500 annual returns and the monetary stance taken on by the US Federal Reserve. Armed with this knowledge, we decided to make a model that could predict the annual return on the S&P 500 for any given year. The recipe used in the creation of this model computes the S&P 500 as a sum of the CPI Inflation, Recession and monetary stance. Three recipes with the same formula were created, each with an additional step added on to find the most optimal method of computing the index with a low RMSE (Root mean square error) and high R\^2 (Coefficient of determination).
+
+1.  The first recipe "rec_basic" simply computes the S&P based on the sum of the four variables mentioned earlier.
+2.  The second recipe "rec_interactions" computes S&P using the same formula but by assigning monetary stance (a categorical variable) as a dummy variable (This step is recommended as it allows for the model to deal with a categorical variable by assigning it a binary variable, 0 or 1) and analyses the interaction between each of the variables by multiplying them together (this allows the model created from this recipe to better understand how each variable affects the other and factor it into the model, making the model more accurate). Lastly, all numeric predictors were normalized to make predictions more statistically accurate.
+3.  The third recipe "rec_polynomial" computes S&P using the same formula but aimed to look at the relationship between CPI and S&P as a more complex polynomial relationship. Degree 5 was obtained after trying different variations of degrees to see which one yielded the lowest RMSE and highest R\^2 value. Once again all numeric predictors were normalized to make predictions more statistically accurate.
+
+Having computed these recipes, we assigned each to a workflow and then a workflow set. We then re-sampled the results to improve the reliability of the predictions from the model. Finally, we graphed the models to see which one performed the best (the one which had the lowest RMSE and highest R\^2 value), extracted it from the workflow set, finalized the model and analyzed metrics like RMSE and R\^2 to augment how well the model would work under real world conditions. From our results we saw that rec_interactions was the best recipe with an RMSE of around 6.3 and an RSQ of around 0.87 (at best).
+
+```{r}
+lin_model1_data <- combined_data4 |>
+  select(`SPX YoY(%)`, Unemployment_YoY, CPI_YoY, Recession, Monetary_stance)
+
+lm1_split <- initial_validation_split(lin_model1_data, prop = c(0.6, 0.2))
+lm1_train <- training(lm1_split)
+lm1_val <- validation(lm1_split)
+lin_model1_test <- testing(lm1_split)
+
+rec_basic <- recipe(`SPX YoY(%)` ~ CPI_YoY + Recession + Monetary_stance + Unemployment_YoY, data = lm1_train)
+
+rec_interactions <- recipe(`SPX YoY(%)` ~ CPI_YoY + Recession + Monetary_stance + Unemployment_YoY, data = lm1_train) |>
+  step_dummy(Monetary_stance) |>
+  step_interact(~ CPI_YoY * Unemployment_YoY + `SPX YoY(%)` * Unemployment_YoY + CPI_YoY * `SPX YoY(%)`) |>
+  step_normalize(all_numeric_predictors())
+
+rec_polynomial <- recipe(`SPX YoY(%)` ~ CPI_YoY + Recession + Monetary_stance + Unemployment_YoY, data = lm1_train) |>
+  step_poly(CPI_YoY, degree = 5) |>
+  step_normalize(all_numeric_predictors())
+
+lm1_wflow <- workflow() |>
+  add_model(linear_reg()) |>
+  add_recipe(rec_interactions)  
+
+final_w1 <- workflow_set(
+  preproc = list(
+    basic = rec_basic,
+    interactions = rec_interactions,
+    polynomial = rec_polynomial
+  ),
+  models = list(lm = linear_reg())
+) |>
+  workflow_map(
+    fn = "fit_resamples",
+    seed = 100,
+    resamples = validation_set(lm1_split)
+  )
+
+final_w1 |>
+  autoplot() +
+  geom_label_repel(aes(label = wflow_id))
+
+best_SPX <- final_w1 |>
+  extract_workflow_set_result("interactions_lm") |>
+  select_best(metric = "rmse")
+
+final_w1 |>
+  extract_workflow("interactions_lm") |>
+  finalize_workflow(best_SPX) |>
+  last_fit(lm1_split) |>
+  collect_metrics()
+```
+
+## Exploratory Linear Model 2
+
+Having created a model that computed the return on the S&P 500 we thought it might be interesting to create a model that computed the unemployment rate based on the knowledge that CPI, S&P and unemployment were related to one another in some way. Once again, three recipes, all with the same formula were created, each with some steps added on to find the most optimal model that fit the data. The recipe formula was computed as the sum of CPI and the return on the S&P 500.
+
+1.  The first recipe "rec_basic1" uses the basic formula along with a step to normalize the predictions to increase the reliability and accuracy of predictions.
+2.  The second recipe "rec_interactions1" uses the basic formula along with a step that computes the interaction between each variable by multiplying them with each other and another step that once again normalizes all numeric predictors.
+3.  The third recipe "rec_polynomial1" uses the basic formula along with two steps to see if CPI and the S&P has a more complex relationship with the unemployment rate. Once again, Degree 2 was obtained after trying different variations of degrees to see which one yielded the lowest RMSE and highest R\^2 value. Lastly, all numeric predictors were normalized.
+
+Having computed these recipes, we assigned each to a workflow and then a workflow set. We then re-sampled the results to improve the reliability of the predictions from the model. Finally, we graphed the models to see which one performed the best (the one which had the lowest RMSE and highest R\^2 value), extracted it from the workflow set, finalized the model and analyzed metrics like RMSE and R\^2 to augment how well the model would work under real world conditions. From our results we saw that rec_interactions was the best recipe with an RMSE of around 20 and an RSQ of around 0.64 (at best).
+
+```{r}
+lin_model2_data <- combined_data4 
+  
+lm2_split <- initial_validation_split(lin_model1_data, prop = c(0.6, 0.2))
+lm2_train <- training(lm1_split)
+lm2_val <- validation(lm1_split)
+lin_model2_test <- testing(lm1_split)
+
+rec_basic1 <- recipe(Unemployment_YoY ~ CPI_YoY + `SPX YoY(%)`, data = lm1_train) |>
+  step_normalize(all_numeric_predictors())
+
+rec_interactions1 <- recipe(Unemployment_YoY ~ CPI_YoY + `SPX YoY(%)`, data = lm1_train) |>
+  step_interact(~ CPI_YoY * Unemployment_YoY + `SPX YoY(%)` * Unemployment_YoY + CPI_YoY * `SPX YoY(%)`) |>
+  step_normalize(all_numeric_predictors())
+
+rec_polynomial1 <- recipe(Unemployment_YoY ~ CPI_YoY + `SPX YoY(%)`, data = lm1_train) |>
+  step_poly(CPI_YoY, degree = 2) |>
+  step_poly(`SPX YoY(%)`, degree = 2) |>
+  step_normalize(all_numeric_predictors())
+
+rec_all <- recipe(Unemployment_YoY ~ ., data = lm1_train)
+
+lm1_wflow <- workflow() |>
+  add_model(linear_reg()) |>
+  add_recipe(rec_all)
+
+lm1_wflow |>
+  fit(lm1_train) |>
+  predict(new_data = lm1_val) |>
+  bind_cols(lm1_val) |>
+  ggplot(aes(x = .pred, y = Unemployment_YoY)) +
+  geom_point() +
+  labs(
+    title = "Predicted vs Actual Unemployment YoY",
+    x = "Predicted Unemployment YoY",
+    y = "Actual Unemployment YoY"
+  ) +
+  theme_minimal() +
+  geom_abline(intercept = 0, slope = 1)
+
+final_w2 <- workflow_set(
+  preproc = list(
+    regular = rec_basic1,
+    interactions = rec_interactions1,
+    polynomial = rec_polynomial1
+  ), 
+  models = list(lm = linear_reg())
+) |>
+  workflow_map(
+    fn = "fit_resamples",
+    seed = 100,
+    resamples = validation_set(lm2_split)
+  )
+
+final_w2 |>
+  autoplot() +
+  geom_label_repel(aes(label = wflow_id))
+
+best_un <- final_w1 |>
+  extract_workflow_set_result("interactions_lm") |>
+  select_best(metric = "rmse")
+
+final_w2 |>
+  extract_workflow("interactions_lm") |>
+  finalize_workflow(best_un) |>
+  last_fit(lm2_split) |>
+  collect_metrics()
+```
+
+## Final Linear Model
+
+Having created two models and observing that the S&P model performed more optimally than the unemployment rate model we decided to make a final S&P model with a few more steps to see if we could make it even more accurate. We decided to
+
+1.  set a dummy variable for recession for "rec_basic" and monetary stance for "rec_interactions"
+2.  adding a polynomial function to see if the relationship between unemployment was a complex one of degree 2 or more.
+
+When we ran our models, we saw that "rec_polynomial" fit the data the best. Our learning from this was that recession and monetary stance had a lesser effect on the unemployment rate as compared to CPI Inflation and the return of the S&P 500.
+
+```{r}
+lin_model_data <- combined_data4 |>
+  select(`SPX YoY(%)`, Unemployment_YoY, CPI_YoY, Recession, Monetary_stance)
+
+lm_split <- initial_validation_split(lin_model1_data, prop = c(0.6, 0.2))
+lm_train <- training(lm_split)
+lm_val <- validation(lm_split)
+lm_test <- testing(lm_split)
+
+rec_basic <- recipe(`SPX YoY(%)` ~ CPI_YoY + Recession + Monetary_stance + Unemployment_YoY, data = lm1_train) |>
+  step_dummy(Recession) |>
+  step_interact(~ CPI_YoY * Unemployment_YoY + `SPX YoY(%)` * Unemployment_YoY + CPI_YoY * `SPX YoY(%)`)
+
+rec_interactions <- recipe(`SPX YoY(%)` ~ CPI_YoY + Recession + Monetary_stance + Unemployment_YoY, data = lm1_train) |>
+  step_dummy(Monetary_stance) |>
+  step_interact(~ CPI_YoY * Unemployment_YoY + `SPX YoY(%)` * Unemployment_YoY + CPI_YoY * `SPX YoY(%)`) |>
+  step_normalize(all_numeric_predictors())
+
+rec_polynomial <- recipe(`SPX YoY(%)` ~ CPI_YoY + Recession + Monetary_stance + Unemployment_YoY, data = lm1_train) |>
+  step_interact(~ CPI_YoY * Unemployment_YoY + `SPX YoY(%)` * Unemployment_YoY + CPI_YoY * `SPX YoY(%)`) |>
+  step_poly(Unemployment_YoY, degree = 2) |>
+  step_normalize(all_numeric_predictors())
+
+lm1_wflow <- workflow() |>
+  add_model(linear_reg()) |>
+  add_recipe(rec_interactions)  
+
+final_wf <- workflow_set(
+  preproc = list(
+    basic = rec_basic,
+    interactions = rec_interactions,
+    polynomial = rec_polynomial
+  ),
+  models = list(lm = linear_reg())
+) |>
+  workflow_map(
+    fn = "fit_resamples",
+    seed = 100,
+    resamples = validation_set(lm_split)
+  )
+
+final_wf |>
+  autoplot() +
+  geom_label_repel(aes(label = wflow_id))
+
+best_SPX1 <- final_w1 |>
+  extract_workflow_set_result("polynomial_lm") |>
+  select_best(metric = "rmse")
+
+final_wf |>
+  extract_workflow("polynomial_lm") |>
+  finalize_workflow(best_SPX1) |>
+  last_fit(lm1_split) |>
+  collect_metrics()
+```
+
+## Advanced Model
+
+```{r}
+# Step 1: Data Preparation
+# Select relevant features
+model_data <- combined_data4 |>
+  select(`SPX YoY(%)`, Unemployment_YoY, CPI_YoY, Recession, Monetary_stance)
+
+# Step 2: Splitting the Data
+set.seed(123)
+data_split <- initial_split(model_data, prop = 0.8)
+train_data <- training(data_split)
+test_data <- testing(data_split)
+
+# Step 3: Define the Random Forest Model
+rf_model <- rand_forest(
+  mtry = 2,               # Number of predictors considered at each split
+  trees = 500,            # Number of trees
+  min_n = 5               # Minimum node size
+) |>
+  set_engine("randomForest") |> # Use the 'ranger' engine for efficient computation
+  set_mode("regression")  # Specify regression mode
+
+# Step 4: Create the Workflow
+rf_workflow <- workflow() |>
+  add_model(rf_model) |>
+  add_formula(`SPX YoY(%)` ~ Unemployment_YoY + CPI_YoY + Recession + Monetary_stance)
+
+# Step 5: Train the Random Forest Model
+rf_fit <- rf_workflow |>
+  fit(data = train_data)
+
+# Step 6: Evaluate the Model
+# Make predictions on the test set
+rf_predictions <- predict(rf_fit, new_data = test_data) |>
+  bind_cols(test_data)
+
+# Calculate performance metrics
+rf_metrics <- rf_predictions |>
+  metrics(truth = `SPX YoY(%)`, estimate = .pred)
+
+# View performance metrics
+print(rf_metrics)
+
+# Step 7: Feature Importance (Optional)
+rf_importance <- rf_fit %>%
+  extract_fit_parsnip() %>%
+  vip::vip()
+
+# Display Feature Importance
+print(rf_importance)
+
+```
+
+## **Limitations of the Data**
+
+1.  **CPI Methodology Changes**:
+
+    -   The methodology for calculating the Consumer Price Index (CPI) has evolved over time. Changes in the basket of goods, weighting, and other adjustments may introduce inconsistencies when comparing CPI data across years.
+
+2.  **Missing October 1st Data**:
+
+    -   All October 1st data points were removed due to missing entries, resulting in only 11 months of data for each year. This impacts year-over-year (YoY) calculations, as the lag was adjusted to 11 months instead of the standard 12. This simplification might overlook some seasonal or cyclical trends that occur annually.
+
+3.  **Subjective Definition of Monetary Stance**:
+
+    -   The classification of monetary stance (Restrictive, Neutral, Accommodative) depends on subjective choices, such as using the Neutral Rate and a ±0.5% bandwidth. While these thresholds are informed by economic theory, they may not perfectly capture nuanced central bank intentions or real-world impacts.
+
+4.  **Use of 1-Year Forward Inflation Expectations**:
+
+    -   The calculation of the Neutral Rate relies on 1-year forward inflation expectations (`One_year_inflation (%)`), which are based on forecasts. These expectations may not accurately reflect actual future inflation, introducing potential bias in the estimation of the Neutral Rate and monetary stance.
+
+5.  **Assumptions in Recession Data**:
+
+    -   The recession indicator (`Recession`) is binary and does not account for the depth or severity of economic downturns. This simplification may obscure differences between mild slowdowns and severe recessions.
+
+6.  **Exclusion of Other Relevant Factors**:
+
+    -   Some factors influencing the S&P 500 and macroeconomic indicators, such as geopolitical events, technological innovations, or global economic conditions, are not included in the dataset. This limits the scope of the analysis.
+
+7.  **Static Model of Monetary Policy**:
+
+    -   The dataset assumes that the relationship between variables, such as interest rates and inflation, remains consistent over time. However, these relationships can evolve due to changing economic conditions, market expectations, and central bank policies.
+
+## Conclusion
+
+Through a series of exploratory plots, linear and advanced models, we were able to understand the underlying factors that drive fluctuation in the S&P 500 and understand how macroeconomic factors influence market behavior. We learned that factors like CPI Inflation, unemployment rate and the monetary stances taken on the US Federal Reserve, were far more interconnected that we previously imagined and that a change in one of these variables would result in a domino of effects on all other macroeconomic factors.
