@@ -1,5 +1,5 @@
 ---
-title: "Final Project v14"
+title: "S&P Returns Analysis and Model"
 output: html_document
 date: "2024-12-10"
 ---
